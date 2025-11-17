@@ -1,10 +1,19 @@
 #!/bin/bash
+set +e
+mongosh_path=$(which mongosh)
+mongo_path=$(which mongo)
+
 set -eo pipefail
-
 host="$(hostname --ip-address || echo '127.0.0.1')"
-
-if mongo --quiet "$host/test" --eval 'quit(db.runCommand({ ping: 1 }).ok ? 0 : 2)'; then
-	exit 0
+if [ -n "${mongosh_path}" ]; then
+	# Mongo v6.0 or later use the `mongosh` shell.
+	if mongosh --quiet "$host/test" --eval 'disableTelemetry(); quit(db.runCommand({ ping: 1 }).ok ? 0 : 2)'; then
+		exit 0
+	fi
+elif [ -n "${mongo_path}" ]; then
+	# Older mongo versions ship with the `mongo` shell.
+	if mongo --quiet "$host/test" --eval 'quit(db.runCommand({ ping: 1 }).ok ? 0 : 2)'; then
+       exit 0
+	fi
 fi
-
 exit 1

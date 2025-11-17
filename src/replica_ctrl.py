@@ -71,12 +71,7 @@ def is_service_up(mongo_service):
 def get_running_tasks(mongo_service):
     tasks = []
     for t in mongo_service.tasks(filters={'desired-state': "running"}):
-        if t['Status']['State'] in ["running", "starting"]:
-            # If the mongo services have never been initialised as a replicaset before,
-            # the service won't transition to a `running` state until *after* the
-            # replicaset has been initialised.  That means we need to allow connection
-            # attempts to proceed while the state is still `starting` so that we can
-            # actually perform that initialisation step.
+        if t['Status']['State'] == "running":
             tasks.append(t)
     return tasks
 

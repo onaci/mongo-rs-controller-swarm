@@ -22,11 +22,15 @@ services:
       - backend
     configs:
     # to avoid changes to the original mongo image, we import the healthcheck script using configs
-      - mongo-healthcheck
+      - source: mongo-healthcheck
+        target: /mongo-healthcheck
+        mode: 0755
     # it simply checks that the client can connect to mongo. No test is run w.r.t. the cluster.
     healthcheck:
         test: ["CMD", "bash", "/mongo-healthcheck"]
         interval: 1m
+        start_period: 1m
+        start_interval: 5s
         timeout: 10s
         retries: 3
     deploy:
