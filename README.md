@@ -21,6 +21,7 @@ and usage of secrets)
 Unofficially tested versions:
 
 - mongo v4.4 with docker-ce v29.0.0
+- mongo v5.0 with docker-ce v29.0.0
 
 ## How to use
 First, you need to have a Docker Swarm (docker >= 17.06.0-ce) already setup (See Testing for a local setup).
@@ -67,7 +68,7 @@ To remove the stack:
 
 You can configure the following environment variables for deploying your stack using the provided [`docker-compose.yml`](docker-compose.yml) file (the variables are used in the controller service, so they are important, without configuring them, the service won't work correctly):
 
-* `MONGO_VERSION`, the default value is `4.4`
+* `MONGO_VERSION`, the default value is `5.0`
 * `REPLICASET_NAME`, the default value is `rs`
 * `MONGO_PORT`, the default value is `27017`
 * `BACKEND_NETWORK_NAME`, the default value is `backend`

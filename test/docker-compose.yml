@@ -2,7 +2,7 @@
 services:
 
     mongo:
-      image: mongo:${MONGO_VERSION:-4.4}
+      image: mongo:${MONGO_VERSION:-5.0}
       entrypoint: [ "/usr/bin/mongod", "--replSet", "${REPLICASET_NAME:-rs}", "--journal", "--bind_ip", "0.0.0.0"]
       ports:
         - "${MONGO_PORT:-27017}:27017"
@@ -35,7 +35,7 @@ services:
         MONGO_SERVICE_NAME: ${STACK_NAME:-mongo}_mongo
         REPLICASET_NAME: ${REPLICASET_NAME:-rs}
         MONGO_PORT: 27017
-        DEBUG: 1  #uncomment to test the script
+        DEBUG: 1 #uncomment to test the script
       entrypoint: python /src/replica_ctrl.py
       networks:
           - backend
