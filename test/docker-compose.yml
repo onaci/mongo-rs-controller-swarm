@@ -2,7 +2,7 @@
 services:
 
     mongo:
-      image: mongo:${MONGO_VERSION:-7.0}
+      image: mongo:${MONGO_VERSION:-8.2}
       entrypoint: [ "/usr/bin/mongod", "--replSet", "${REPLICASET_NAME:-rs}", "--bind_ip", "0.0.0.0"]
       ports:
         - "${MONGO_PORT:-27017}:27017"

@@ -25,6 +25,7 @@ Unofficially tested versions:
 - mongo v5.0 with docker-ce v29.0.0
 - mongo v6.0 with docker-ce v29.0.0
 - mongo v7.0 with docker-ce v29.0.0
+- mongo v8.2 with docker-ce v29.0.0
 
 ## How to use
 First, you need to have a Docker Swarm (docker >= 17.06.0-ce) already setup (See Testing for a local setup).
