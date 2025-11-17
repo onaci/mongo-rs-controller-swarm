@@ -2,9 +2,9 @@
 services:
 
   nosqlclient:
-    image: mongoclient/mongoclient:2.2.0 #2.2.0 is the latest stable version
+    image: mongoclient/mongoclient:4.0.1 #4.0.1 is the latest stable version
     environment:
-      MONGOCLIENT_DEFAULT_CONNECTION_URL: mongodb://${STACK_NAME:-mongo}_mongo:27017/?replicaSet=${REPLICASET_NAME:-rs}
+      MONGO_URL: mongodb://${STACK_NAME:-mongo}_mongo:27017/?replicaSet=${REPLICASET_NAME:-rs}
     ports:
       - "${NOSQLCLIENT_PORT:-3000}:3000"
     networks:
