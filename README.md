@@ -20,8 +20,10 @@ and usage of secrets)
 
 Unofficially tested versions:
 
+- mongo v3.6 with docker-ce v29.0.0
 - mongo v4.4 with docker-ce v29.0.0
 - mongo v5.0 with docker-ce v29.0.0
+- mongo v6.0 with docker-ce v29.0.0
 
 ## How to use
 First, you need to have a Docker Swarm (docker >= 17.06.0-ce) already setup (See Testing for a local setup).
