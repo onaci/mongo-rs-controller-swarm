@@ -23,7 +23,7 @@ INPUT: Via environment variables. See get_required_env_variables.
 
 # TODO: Add tests
 """
-from pymongo.errors import PyMongoError, OperationFailure, ServerSelectionTimeoutError
+from pymongo.errors import OperationFailure, ServerSelectionTimeoutError
 import docker
 import logging
 import os
@@ -117,8 +117,8 @@ def create_mongo_config(tasks_ips, replicaset_name, mongo_port):
     members = []
     for i, ip in enumerate(tasks_ips):
         members.append({
-          '_id': i,
-          'host': "{}:{}".format(ip, mongo_port)
+            '_id': i,
+            'host': "{}:{}".format(ip, mongo_port)
         })
     config = {
         '_id': replicaset_name,
@@ -140,13 +140,14 @@ def gather_configured_members_ips(mongo_tasks_ips, mongo_port):
             # Let's accept the first configuration found. Read as room for improvement!
             break
         except ServerSelectionTimeoutError as ssete:
-            logger.debug("cannot connect to {} to get configuration, failed ({})".format(t,ssete))
+            logger.debug("cannot connect to {} to get configuration, failed ({})".format(t, ssete))
         except OperationFailure as of:
-            logger.debug("no configuration found in node {} ({})".format(t,of))
+            logger.debug("no configuration found in node {} ({})".format(t, of))
         finally:
             mc.close()
     logger.debug("Current members in mongo configurations: {}".format(current_ips))
     return current_ips
+
 
 def get_primary_ip(tasks_ips, mongo_port):
     logger = logging.getLogger(__name__)
@@ -158,9 +159,9 @@ def get_primary_ip(tasks_ips, mongo_port):
             if mc.is_primary:
                 primary_ips.append(t)
         except ServerSelectionTimeoutError as ssete:
-            logger.debug("cannot connect to {} check if primary, failed ({})".format(t,ssete))
+            logger.debug("cannot connect to {} check if primary, failed ({})".format(t, ssete))
         except OperationFailure as of:
-            logger.debug("no configuration found in node {} ({})".format(t,of))
+            logger.debug("no configuration found in node {} ({})".format(t, of))
         finally:
             mc.close()
 
@@ -192,7 +193,7 @@ def update_config(primary_ip, current_ips, new_ips, mongo_port):
             time.sleep(10)
             primary_ip = get_primary_ip(list(new_ips), mongo_port)
             attempts -= 1
-            logger.debug("No new primary yet automatically elected...".format(primary_ip))
+            logger.debug("No new primary yet automatically elected...")
 
         if primary_ip is None:
             # If not, let's find the first mongo that is member of the old cluster
@@ -290,7 +291,7 @@ if __name__ == '__main__':
     mongo_service_name = envs.pop('mongo_service_name')
 
     # Simple logging
-    if 'DEBUG' is os.environ:
+    if 'DEBUG' in os.environ:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
