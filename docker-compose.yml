@@ -2,14 +2,14 @@
 services:
 
   mongo:
-    image: mongo:${MONGO_VERSION:-6.0}
+    image: mongo:${MONGO_VERSION:-7.0}
     # the bind_ip option is requried from MONGO Version 3.6, alternatively you can use --bind_ip_all
     user: mongodb
     entrypoint:
       - "/usr/bin/mongod"
       - "--replSet"
       - "${REPLICASET_NAME:-rs}"
-      - "--journal"
+      #- "--journal"      # Deprecated since MONGO_VERSION==6.1
       #- "--smallfiles"   # Deprecated since MONGO_VERSION==4.0
       - "--bind_ip"
       - "0.0.0.0"
