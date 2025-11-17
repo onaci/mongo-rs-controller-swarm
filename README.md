@@ -6,21 +6,14 @@ This repository provides a dockerized controller for a Mongo DB replica-set depl
 
 Officially tested mongo versions:
 
-* 3.6
-* 3.4
-* 3.2
-* 3.0
+- (None yet)
 
 Officially tested docker versions:
 
-* 17.06
-* 17.09
-* 17.03 (via [tag d17.06.0-m3.2](https://github.com/smartsdk/mongo-rs-controller-swarm/blob/d17.06.0-m3.2/docker-compose.yml)
-and usage of secrets)
+- (None yet)
 
 Unofficially tested versions:
 
-- mongo v3.6 with docker-ce v29.0.0
 - mongo v4.4 with docker-ce v29.0.0
 - mongo v5.0 with docker-ce v29.0.0
 - mongo v6.0 with docker-ce v29.0.0

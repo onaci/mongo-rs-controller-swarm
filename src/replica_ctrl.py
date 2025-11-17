@@ -106,7 +106,7 @@ def init_replica(mongo_tasks_ips, replicaset_name, mongo_port):
 
     # Choose a primary and configure replicaset
     primary_ip = list(mongo_tasks_ips)[0]
-    primary = pm.MongoClient(primary_ip, mongo_port)
+    primary = pm.MongoClient(primary_ip, mongo_port, directConnection=True)
     try:
         res = primary.admin.command("replSetInitiate", config)
     except OperationFailure as e:
@@ -137,7 +137,7 @@ def gather_configured_members_ips(mongo_tasks_ips, mongo_port):
     current_ips = set()
     logger = logging.getLogger(__name__)
     for t in mongo_tasks_ips:
-        mc = pm.MongoClient(t, mongo_port)
+        mc = pm.MongoClient(t, mongo_port, directConnection=True)
         try:
             config = mc.admin.command("replSetGetConfig")['config']
             for m in config['members']:
@@ -159,7 +159,7 @@ def get_primary_ip(tasks_ips, mongo_port):
 
     primary_ips = []
     for t in tasks_ips:
-        mc = pm.MongoClient(t, mongo_port)
+        mc = pm.MongoClient(t, mongo_port, directConnection=True)
         try:
             if mc.is_primary:
                 primary_ips.append(t)
@@ -206,7 +206,7 @@ def update_config(primary_ip, current_ips, new_ips, mongo_port):
             primary_ip = old_members[0] if old_members else list(new_ips)[0]
             logger.debug("Choosing {} as the new primary".format(primary_ip))
 
-    cli = pm.MongoClient(primary_ip, mongo_port)
+    cli = pm.MongoClient(primary_ip, mongo_port, directConnection=True)
     try:
         config = cli.admin.command("replSetGetConfig")['config']
         logger.debug("Old Members: {}".format(config['members']))

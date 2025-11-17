@@ -7,7 +7,7 @@ RUN apk update \
 
 RUN pip install --upgrade pip && \
     pip install docker==7.1.0 && \
-    pip install pymongo==3.13.0
+    pip install pymongo==4.15.4
 
 WORKDIR /src
 COPY src/replica_ctrl.py ./
