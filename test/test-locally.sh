@@ -5,7 +5,7 @@ oneTimeSetUp(){
   miniswarm start 3
   eval $(docker-machine env ms-manager0)
   docker network create  --attachable --opt encrypted -d overlay backend
-  docker stack deploy -c docker-compose.yml mongo
+  docker stack deploy -c docker-compose.yml mongo --detach=true
   docker run --name client --network=backend -d mongo:3.2 tail -f /dev/null
   echo "Created MongoDB Client"
 }
@@ -168,7 +168,7 @@ testStopSwarmManagerRestore(){
 
 testRestartMongoIsRunning(){
   docker stack rm mongo
-  docker stack deploy -c docker-compose.yml mongo
+  docker stack deploy -c docker-compose.yml mongo --detach=true
   sleep 120 #time needed to restart
   result=$(docker service ls -f name=mongo_mongo --format "{{.Name}}:{{.Mode}}")
   assertEquals "mongo_mongo:global" "${result}"

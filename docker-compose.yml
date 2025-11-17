@@ -1,10 +1,10 @@
-version: '3.3'
 
 services:
 
   mongo:
     image: mongo:${MONGO_VERSION:-3.2}
-    # the bind_ip option is requried from MONGO Version 3.6, alternatively you can use --bind_ip_all
+    # the bind_ip option is requried from MONGO Version 3.6, alternatively you can use --bind_ip_all
+    user: mongodb
     entrypoint: [ "/usr/bin/mongod", "--replSet", "${REPLICASET_NAME:-rs}", "--journal", "--smallfiles", "--bind_ip", "0.0.0.0"]
     # ports:
     #   - "${MONGO_PORT:-27017}:27017"
@@ -31,16 +31,15 @@ services:
         delay: 1m30s
 
   controller:
-    image: martel/mongo-replica-ctrl:latest
+    image: martel/mongo-replica-ctrl:${DOCKER_TAG:-latest}
     volumes:
       # TODO: Avoid exposing the docker socket (security issue)
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - OVERLAY_NETWORK_NAME=${BACKEND_NETWORK_NAME:-backend}
-      - MONGO_SERVICE_NAME=${STACK_NAME:-mongo}_mongo
-      - REPLICASET_NAME=${REPLICASET_NAME:-rs}
-      - MONGO_PORT=27017
-          # - DEBUG=1 #uncomment to debug the script
+      OVERLAY_NETWORK_NAME: ${BACKEND_NETWORK_NAME:-backend}
+      MONGO_SERVICE_NAME: ${STACK_NAME:-mongo}_mongo
+      REPLICASET_NAME: ${REPLICASET_NAME:-rs}
+      #DEBUG: 1 #uncomment to debug the script
     entrypoint: python /src/replica_ctrl.py
     networks:
       - backend
@@ -66,5 +65,5 @@ volumes:
 
 networks:
   backend:
-    external:
-      name: ${BACKEND_NETWORK_NAME:-backend}
+    external: true
+    name: ${BACKEND_NETWORK_NAME:-backend}

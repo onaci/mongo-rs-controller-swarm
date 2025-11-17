@@ -28,7 +28,7 @@ Secondly you need to create an overlay network called `backend` (when creating t
 
 Then, simply run
 
-* `docker stack deploy -c docker-compose.yml STACK_NAME`
+* `docker stack deploy -c docker-compose.yml STACK_NAME --detach=true`
 
 Alternatively, you can use the simple [script](deploy.sh) we created that covers both steps:
 
@@ -40,8 +40,8 @@ Allow some time while images are pulled in the nodes and services are deployed. 
 $ docker service ls
 ID                  NAME                MODE                REPLICAS            IMAGE                              PORTS
 hmld6tiwr5o0        mongo_mongo         global              0/3                 mongo:3.2                          *:27017->27017/tcp
-uppaix6drfps        mongo_controller    replicated          1/1                 martel/mongo-replica-ctrl:latest   
-```  
+uppaix6drfps        mongo_controller    replicated          1/1                 martel/mongo-replica-ctrl:dev
+```
 
 You can also check the operations performed by the *controller* reading the logs:
 
@@ -55,7 +55,7 @@ mongo_controller.1.sv8eztwisitz@swarm-manager    | INFO:__main__:To remove: {'10
 mongo_controller.1.sv8eztwisitz@swarm-manager    | INFO:__main__:To add: {'10.0.0.7', '10.0.0.6'}
 mongo_controller.1.sv8eztwisitz@swarm-manager    | INFO:__main__:new replSetReconfig: {'ok': 1.0}
 mongo_controller.1.sv8eztwisitz@swarm-manager    | INFO:__main__:Primary is: 10.0.0.6
-```  
+```
 
 To remove the stack:
 
@@ -69,6 +69,7 @@ You can configure the following environment variables for deploying your stack u
 * `BACKEND_NETWORK_NAME`, the default value is `backend`
 * `STACK_NAME`, the default value is `mongo`
 * `MONGO_SERVICE_NAME`, the default value is `${STACK_NAME:}_mongo`
+* `DOCKER_TAG`, the tag for the `mongo_controller` images which should be built and deployed. (Use `latest` to pull the most recent image from the docker registry, but you should use a different value in a development or test environment to avoid clashes with the registered version)
 
 
 Few hints, to customise the [`docker-compose.yml`](docker-compose.yml) orchestration according to your needs:
@@ -91,7 +92,7 @@ Few hints, to customise the [`docker-compose.yml`](docker-compose.yml) orchestra
 
 * To include addons such as *nosqlclient* as a mongodb management service, you can use the `docker-compose-addons.yml`. You can configure the exposed port for *nosqlclient* by setting the *NOSQLCLIENT_PORT* variable *before* you launch the stack.
 
-* `docker stack deploy -c docker-compose-addons.yml addons`
+* `docker stack deploy -c docker-compose-addons.yml addons --detach=true`
 
 
 ## Features
