@@ -18,6 +18,10 @@ Officially tested docker versions:
 * 17.03 (via [tag d17.06.0-m3.2](https://github.com/smartsdk/mongo-rs-controller-swarm/blob/d17.06.0-m3.2/docker-compose.yml)
 and usage of secrets)
 
+Unofficially tested versions:
+
+- mongo v4.4 with docker-ce v29.0.0
+
 ## How to use
 First, you need to have a Docker Swarm (docker >= 17.06.0-ce) already setup (See Testing for a local setup).
 Secondly you need to create an overlay network called `backend` (when creating the network and setting up the Swarm cluster, *be careful with MTU issues!* Locally you won't have any, but using cloud providers, you may hit several ones):
@@ -63,7 +67,7 @@ To remove the stack:
 
 You can configure the following environment variables for deploying your stack using the provided [`docker-compose.yml`](docker-compose.yml) file (the variables are used in the controller service, so they are important, without configuring them, the service won't work correctly):
 
-* `MONGO_VERSION`, the default value is `3.2`
+* `MONGO_VERSION`, the default value is `4.4`
 * `REPLICASET_NAME`, the default value is `rs`
 * `MONGO_PORT`, the default value is `27017`
 * `BACKEND_NETWORK_NAME`, the default value is `backend`
