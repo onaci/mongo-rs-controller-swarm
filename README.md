@@ -41,7 +41,7 @@ Allow some time while images are pulled in the nodes and services are deployed. 
 ```
 $ docker service ls
 ID                  NAME                MODE                REPLICAS            IMAGE                              PORTS
-hmld6tiwr5o0        mongo_mongo         global              0/3                 mongo:3.2                          *:27017->27017/tcp
+hmld6tiwr5o0        mongo_mongo         global              0/3                 mongo:8.2                          *:27017->27017/tcp
 uppaix6drfps        mongo_controller    replicated          1/1                 martel/mongo-replica-ctrl:dev
 ```
 
@@ -65,13 +65,13 @@ To remove the stack:
 
 You can configure the following environment variables for deploying your stack using the provided [`docker-compose.yml`](docker-compose.yml) file (the variables are used in the controller service, so they are important, without configuring them, the service won't work correctly):
 
-* `MONGO_VERSION`, the default value is `5.0`
+* `MONGO_VERSION`, the default value is `8.2`
 * `REPLICASET_NAME`, the default value is `rs`
 * `MONGO_PORT`, the default value is `27017`
 * `BACKEND_NETWORK_NAME`, the default value is `backend`
 * `STACK_NAME`, the default value is `mongo`
 * `MONGO_SERVICE_NAME`, the default value is `${STACK_NAME:}_mongo`
-* `DOCKER_TAG`, the tag for the `mongo_controller` images which should be built and deployed. (Use `latest` to pull the most recent image from the docker registry, but you should use a different value in a development or test environment to avoid clashes with the registered version)
+* `CONTROLLER_TAG`, the tag for the `mongo_controller` images which should be built and deployed. (Use `latest` to pull the most recent image from the docker registry, but you should use a different value in a development or test environment to avoid clashes with the registered version)
 
 
 Few hints, to customise the [`docker-compose.yml`](docker-compose.yml) orchestration according to your needs:
@@ -147,7 +147,7 @@ The script [test-locally.sh](test/test-locally.sh) aims to cover the following c
 * [ ] Kills a the Primary MongoDB container and checks if a new container is created and the MongoDB cluster status is ok.
 * [x] Stop a Swarm node and checks if the MongoDB cluster status is ok.
 * [x] Restart a Swarm node and checks if the MongoDB cluster status is ok.
-* [ ] Remove the MongoDB cluster and re-create it to verify that data persistence is not affecting the MongoDB status.
+* [x] Remove the MongoDB cluster and re-create it to verify that data persistence is not affecting the MongoDB status.
 
 You can run the test with:
 
@@ -155,7 +155,16 @@ You can run the test with:
 
 Tests starting with `ci-test` are designed for Travis CI, they won't run locally, unless you install as well a MongoDB Client.
 
-**N.B.:** Tests creates a cluster using `miniswarm` if you already created a cluster using it, the tests will delete it and create a new one.
+**N.B.:** Tests can optionally create a cluster using `miniswarm` if that utility is available. If you already created a cluster using it, the tests will delete it and create a new one.
+
+Alternatively if you do *not* have the `miniswarm` utility installed, but the local docker instance is
+configured for docker swarm mode, then you can deploy to the local swarm instead.  If you do that,
+you may wish to configure the following environment variables:
+
+- `MANAGER_NODE` as the node-name for the swarm manager node that is safe to drain during testing
+- `WORKER_NODE` as the node-name for a swarm-worker node that is safe to drain during testing.
+
+If these variables are not configured, then the test which drain and reactivate swarm nodes will be skipped.
 
 ## To do
 - [ ] Support authentication to MongoDB

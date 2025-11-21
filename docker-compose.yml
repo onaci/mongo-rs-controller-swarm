@@ -17,6 +17,7 @@ services:
     #   - "${MONGO_PORT:-27017}:27017"
     # The usage of volume provides persistence, but may work correctly only with 1 volume per node (that's why global mode is recommended)
     volumes:
+      - mongoconfigdb:/data/configdb
       - mongodata:/data/db
     networks:
       - backend
@@ -28,10 +29,10 @@ services:
     # it simply checks that the client can connect to mongo. No test is run w.r.t. the cluster.
     healthcheck:
         test: ["CMD", "bash", "/mongo-healthcheck"]
-        interval: 1m
-        start_period: 1m
-        start_interval: 5s
-        timeout: 10s
+        interval: ${HEALTHCHECK_INTERVAL:-60}s
+        start_period: ${START_PERIOD_SECONDS:-60}s
+        start_interval: ${START_INTERVAL_SECONDS:-5}s
+        timeout: ${HEALTHCHECK_TIMEOUT:-10}s
         retries: 3
     deploy:
       mode: global
@@ -39,10 +40,10 @@ services:
         condition: on-failure
       update_config:
         parallelism: 1
-        delay: 1m30s
+        delay: ${RESTART_DELAY:-20}s
 
   controller:
-    image: martel/mongo-replica-ctrl:${DOCKER_TAG:-latest}
+    image: martel/mongo-replica-ctrl:${CONTROLLER_TAG:-dev}
     volumes:
       # TODO: Avoid exposing the docker socket (security issue)
       - /var/run/docker.sock:/var/run/docker.sock
@@ -69,6 +70,8 @@ configs:
 
 volumes:
   # External true ensures that the volume is not re-created if already present
+  mongoconfigdb:
+    external: true
   mongodata:
     external: true
 
