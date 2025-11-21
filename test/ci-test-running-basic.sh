@@ -1,6 +1,7 @@
 #!/bin/sh
 
 # Tests if the script is deployed correctly
+MONGO_HOST=$(hostname --ip-address || echo '127.0.0.1')
 
 testMongoIsRunning(){
    sleep 1
@@ -28,13 +29,13 @@ testControllerReplicas(){
 
 testMongoClusterStatus(){
    sleep 10
-   result=$(mongo --quiet localhost/admin --eval "db.runCommand( { replSetGetStatus : 1 } )['ok']")
+   result=$("${MONGO_SHELL:-mongosh}" --quiet "${MONGO_HOST}/admin" --eval "db.runCommand( { replSetGetStatus : 1 } )['ok']")
    assertEquals "1" "${result}"
 }
 
 testMongoClusterSize(){
    sleep 10
-   result=$(mongo --quiet localhost/admin --eval "db.runCommand( { replSetGetStatus : 1 } )['members'].length")
+   result=$("${MONGO_SHELL:-mongosh}" --quiet "${MONGO_HOST}/admin" --eval "db.runCommand( { replSetGetStatus : 1 } )['members'].length")
    assertEquals "3" "${result}"
 }
 
