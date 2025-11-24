@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# See: https://github.com/opencontainers/image-spec/blob/main/annotations.md
+BUILD_TIMESTAMP="$(date --rfc-3339=seconds)"
+SAFE_TIMESTAMP="$(echo $BUILD_TIMESTAMP | sed 's/ /T/g' | sed 's/:/-/g' | sed 's/\+.*//')"
+SOURCE_URL="$(git remote get-url origin || true)"
+VERSION_TAG="${SOURCE_BRANCH}_v${SAFE_TIMESTAMP}-${SOURCE_COMMIT}"
+
+docker build --pull ${ARGS} \
+    --label "org.opencontainers.image.authors=Martel Innovate (original source), CSIRO Coastal Informatics Team (upgrades and extensions in onaci fork)" \
+    --label "org.opencontainers.image.branch=${SOURCE_BRANCH}" \
+    --label "org.opencontainers.image.buildhost=${DOCKER_REPO}" \
+    --label "org.opencontainers.image.created=${BUILD_TIMESTAMP}" \
+    --label "org.opencontainers.image.description=A dockerized controller for a Mongo db replica-set deployed using a Docker Swarm." \
+    --label "org.opencontainers.image.licenses=Apache 2.0" \
+    --label "org.opencontainers.image.revision=${SOURCE_COMMIT}" \
+    --label "org.opencontainers.image.source=${SOURCE_URL}" \
+    --label "org.opencontainers.image.title=onaci/mongo-replica-ctrl" \
+    --label "org.opencontainers.image.url=${DOCKER_REPO}" \
+    --label "org.opencontainers.image.vendor=CSIRO" \
+    --label "org.opencontainers.image.version=${VERSION_TAG}" \
+    -f ${DOCKERFILE_PATH} \
+    -t ${IMAGE_NAME} \
+    .
