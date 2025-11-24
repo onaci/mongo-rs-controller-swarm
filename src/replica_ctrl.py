@@ -26,18 +26,21 @@ INPUT: Via environment variables. See get_required_env_variables.
 from pymongo.errors import OperationFailure, ServerSelectionTimeoutError
 import docker
 import logging
+import math
 import os
 import pymongo as pm
+import signal
 import sys
 import time
 
+
+# region Configuration Settings
 
 def get_required_env_variables():
     REQUIRED_VARS = [
         'OVERLAY_NETWORK_NAME',
         'MONGO_SERVICE_NAME',
         'REPLICASET_NAME',
-        'MONGO_PORT'
     ]
     envs = {}
     for rv in REQUIRED_VARS:
@@ -46,200 +49,350 @@ def get_required_env_variables():
     if not all(envs.values()):
         raise RuntimeError("Missing required ENV variables. {}".format(envs))
 
-    envs['mongo_port'] = int(envs['mongo_port'])
+    OPTIONAL_INT_VARS = [
+        'MONGO_PORT',
+        'START_INTERVAL_SECONDS',
+        'START_PERIOD_SECONDS',
+        'CONTROL_INTERVAL_SECONDS'
+    ]
+    for ov in OPTIONAL_INT_VARS:
+        if ov in os.environ:
+            envs[ov.lower()] = int(os.environ[ov])
     return envs
 
 
-def get_mongo_service(dc, mongo_service_name):
-    mongo_services = [s for s in dc.services.list() if s.name == mongo_service_name]
-    assert len(mongo_services) <= 1, "Unexpected: multiple docker services with the same name '{}': {}".format(mongo_service_name, mongo_services)
-
-    if mongo_services:
-        return mongo_services[0]
-
-    msg = "Error: Could not find mongo service with name {}. \
-           Did you correctly deploy the stack with both services?.\
-          ".format(mongo_service_name)
-    logger = logging.getLogger(__name__)
-    logger.error(msg)
+# endregion
 
 
-def is_service_up(mongo_service):
-    return mongo_service and len(get_running_tasks(mongo_service)) > 0
+# region Docker Swarm Tasks
+def get_service_task_ips(
+    dc: docker.Client,
+    service_name: str,
+    overlay_network_name: str,
+) -> set(str):
+    """Identify the IP addresses for running swarm-service tasks on a specified overlay network.
 
-
-def get_running_tasks(mongo_service):
-    tasks = []
-    for t in mongo_service.tasks(filters={'desired-state': "running"}):
-        if t['Status']['State'] == "running":
-            tasks.append(t)
-    return tasks
-
-
-def get_tasks_ips(tasks, overlay_network_name):
-    tasks_ips = []
-    for t in tasks:
-        for n in t['NetworksAttachments']:
-            if n['Network']['Spec']['Name'] == overlay_network_name:
-                ip = n['Addresses'][0].split('/')[0]  # clean prefix from ip
-                tasks_ips.append(ip)
-    return tasks_ips
-
-
-def init_replica(mongo_tasks_ips, replicaset_name, mongo_port):
-    """
-    Init a MongoDB replicaset from the scratch.
-
-    :param mongo_tasks_ips:
-    :param replicaset_name:
-    :param mongo_port:
+    :param dc:
+        A docker API Client connection.
+    :param service_name:
+        Name of the Docker Swarm Service which tasks should be associated with
+    :param overlay_network_name:
+        Name of the Docker Swarm overlay network which you want IP addresses on.
     :return:
+        A set of unique IP addresses for any running tasks matching these criteria
+        (Will be empty if no tasks are currently running)
     """
-    config = create_mongo_config(mongo_tasks_ips, replicaset_name, mongo_port)
+    task_ips = set()
     logger = logging.getLogger(__name__)
-    logger.debug("Initial config: {}".format(config))
-
-    # Choose a primary and configure replicaset
-    primary_ip = list(mongo_tasks_ips)[0]
-    primary = pm.MongoClient(primary_ip, mongo_port, directConnection=True)
     try:
-        res = primary.admin.command("replSetInitiate", config)
-    except OperationFailure as e:
-        logger.debug("replSetInitiate already configured, forcing configuration ({})".format(e))
-        res = primary.admin.command("replSetReconfig", config, force=True)
-    finally:
-        primary.close()
+        services = dc.services.list(filters={'name': service_name})
+        if len(services) == 0:
+            logger.warning(f"Could not find docker swarm service with name '{service_name}'")
+        elif len(services) > 1:
+            logger.error(f"There are multiple docker swarm services named '{service_name}': {services}")
+        else:
+            candidate_tasks = services[0].tasks(filters={'desired-state': "running"})
+            if len(candidate_tasks) == 0:
+                logger.warning(f"Docker swarm service '{service_name}' exists but has no candidate tasks")
+            else:
+                running_tasks = [
+                    t for t in candidate_tasks
+                    if t['Status']['State'] == "running"
+                ]
+                logger.debug(f"Docker swarm service '{service_name}' exists and has {len(running_tasks)} running of {len(candidate_tasks)} candidate tasks: {candidate_tasks}")
+                for t in running_tasks:
+                    for n in t['NetworksAttachments']:
+                        if n['Network']['Spec']['Name'] == overlay_network_name:
+                            ip = n['Addresses'][0].split('/')[0]  # clean prefix from ip
+                    task_ips.add(ip)
+    except Exception:
+        logger.exception(f"Unexpected exception retrieving running tasks for service '{service_name}'")
+    return task_ips
 
-    logger.info("replSetInitiate: {}".format(res))
+
+def wait_for_service_task_ips(
+    dc: docker.Client,
+    service_name: str,
+    overlay_network_name: str,
+    start_interval_seconds: int = 5,
+    start_period_seconds: int = 60
+) -> set(str):
+    """Poll for Docker Swarm Service Tasks until they are ready.
+
+    :param dc:
+        A docker API Client connection.
+    :param service_name:
+        Name of the Docker Swarm Service which tasks should be associated with
+    :param overlay_network_name:
+        Name of the Docker Swarm overlay network which you want IP addresses on.
+    :param start_interval_seconds:
+        The duration (in seconds) to wait between attempts to discover whether a (re)starting
+        `mongo_service_name` service is ready to accept connections yet.
+        (Like the `start_interval` for docker service healthchecks)
+    :param start_period_seconds:
+        The total duration (in seconds) of grace that a (re)starting `mongo_service_name` service
+        is expected to take to start up and be ready to accept connections.
+        (Like the `start_period` setting for a docker service healthcheck)
+    :return:
+        A set of unique IP addresses for any running tasks matching these criteria
+        (Will be empty if no tasks are currently running)
+
+    """
+    logger = logging.getLogger(__name__)
+    wait_count_max = math.ceil(start_period_seconds / start_interval_seconds)
+    wait_count = 0
+    while wait_count <= wait_count_max:
+        task_ips = get_service_task_ips(
+            dc=dc,
+            service_name=service_name,
+            overlay_network_name=overlay_network_name
+        )
+        if task_ips:
+            logger.log(
+                level=(logging.INFO if (wait_count > 0) else logging.DEBUG),
+                msg=f"Docker service '{service_name}' is up with {len(task_ips)} running tasks attached to the '{overlay_network_name}' network."
+            )
+            return task_ips
+        else:
+            logger.info(msg=f"Docker swarm service '{service_name}' does not have running tasks yet. Retry in {start_interval_seconds}s ({wait_count} of {wait_count_max})")
+            time.sleep(start_interval_seconds)
+            wait_count += 1
+
+    logger.warning(f"Timed out waiting for Docker swarm service '{service_name}' to have running tasks attached to the '{overlay_network_name}' network")
+    return set()
+
+# endregion
 
 
-def create_mongo_config(tasks_ips, replicaset_name, mongo_port):
-    members = []
-    for i, ip in enumerate(tasks_ips):
-        members.append({
-            '_id': i,
-            'host': "{}:{}".format(ip, mongo_port)
-        })
-    config = {
+# region MongoDB Replicasets
+
+def init_replicaset(
+    member_hosts: set(str),
+    replicaset_name: str
+) -> None:
+    """
+    Init a MongoDB replicaset from scratch.
+
+    :param member_hosts:
+        The host-addresses which MongoDB databases that *should* be in the replicaset are listening on.
+    :param replicaset_name:
+        The name which should identify the replicaset on these hosts.
+    :return:
+        The host-address which should be the new replicaset's initial primary.
+    """
+    assert len(member_hosts) > 0
+    logger = logging.getLogger(__name__)
+
+    connect_host = list(member_hosts)[0]
+    rs_config = {
         '_id': replicaset_name,
-        'members': members,
+        'members': [
+            {'_id': i, 'host': member_host}
+            for i, member_host in enumerate(member_hosts)
+        ],
         'version': 1
     }
-    return config
-
-
-def gather_configured_members_ips(mongo_tasks_ips, mongo_port):
-    current_ips = set()
-    logger = logging.getLogger(__name__)
-    for t in mongo_tasks_ips:
-        mc = pm.MongoClient(t, mongo_port, directConnection=True)
+    logger.debug(f"Initial replicaset configuration: {rs_config}, connect_host: {connect_host}")
+    with pm.MongoClient(host=connect_host, directConnection=True) as primary:
         try:
-            config = mc.admin.command("replSetGetConfig")['config']
-            for m in config['members']:
-                current_ips.add(m['host'].split(":")[0])
-            # Let's accept the first configuration found. Read as room for improvement!
-            break
-        except ServerSelectionTimeoutError as ssete:
-            logger.debug("cannot connect to {} to get configuration, failed ({})".format(t, ssete))
-        except OperationFailure as of:
-            logger.debug("no configuration found in node {} ({})".format(t, of))
-        finally:
-            mc.close()
-    logger.debug("Current members in mongo configurations: {}".format(current_ips))
-    return current_ips
+            res = primary.admin.command("replSetInitiate", rs_config)
+        except OperationFailure as e:
+            logger.debug(f"replSetInitiate already configured, forcing configuration ({e})")
+            res = primary.admin.command("replSetReconfig", rs_config, force=True)
+        logger.info(f"replSetInitiate: {res}")
+    return connect_host
 
 
-def get_primary_ip(tasks_ips, mongo_port):
-    logger = logging.getLogger(__name__)
+def get_replicaset_hosts(
+    expected_hosts: set(str),
+    replicaset_name: str,
+) -> tuple[set, str | None]:
+    """Retrieve the host-addresses for all *current* replicaset members.
 
-    primary_ips = []
-    for t in tasks_ips:
-        mc = pm.MongoClient(t, mongo_port, directConnection=True)
-        try:
-            if mc.is_primary:
-                primary_ips.append(t)
-        except ServerSelectionTimeoutError as ssete:
-            logger.debug("cannot connect to {} check if primary, failed ({})".format(t, ssete))
-        except OperationFailure as of:
-            logger.debug("no configuration found in node {} ({})".format(t, of))
-        finally:
-            mc.close()
-
-    if len(primary_ips) > 1:
-        logger.warning("Multiple primaries were found ({}). Let's use the first.".format(primary_ips))
-
-    if primary_ips:
-        logger.info("Primary is: {}".format(primary_ips[0]))
-        return primary_ips[0]
-
-
-def update_config(primary_ip, current_ips, new_ips, mongo_port):
-    # Actually not too different from what mongo does:
-    # https://github.com/mongodb/mongo/blob/master/src/mongo/shell/utils.js
-    to_remove = set(current_ips) - set(new_ips)
-    to_add = set(new_ips) - set(current_ips)
-    assert to_remove or to_add
-
-    logger = logging.getLogger(__name__)
-    force = False
-    if primary_ip in to_remove or primary_ip is None:
-        logger.debug("Primary ({}) no longer available".format(primary_ip))
-        force = True
-
-        # Let's see if a new primary was elected
-        attempts = 3
-        primary_ip = None
-        while attempts and not primary_ip:
-            time.sleep(10)
-            primary_ip = get_primary_ip(list(new_ips), mongo_port)
-            attempts -= 1
-            logger.debug("No new primary yet automatically elected...")
-
-        if primary_ip is None:
-            # If not, let's find the first mongo that is member of the old cluster
-            old_members = list(new_ips - to_add)
-            primary_ip = old_members[0] if old_members else list(new_ips)[0]
-            logger.debug("Choosing {} as the new primary".format(primary_ip))
-
-    cli = pm.MongoClient(primary_ip, mongo_port, directConnection=True)
-    try:
-        config = cli.admin.command("replSetGetConfig")['config']
-        logger.debug("Old Members: {}".format(config['members']))
-
-        if to_remove:
-            # Note: As of writing, when a node goes down with a task running
-            # a global service, Swarm is not tearing down that task and hence
-            # this removal part has not been fully tested.
-            logger.info("To remove: {}".format(to_remove))
-            new_members = [m for m in config['members'] if m['host'].split(":")[0] not in to_remove]
-            config['members'] = new_members
-
-        if to_add:
-            logger.info("To add: {}".format(to_add))
-
-            if config['members']:
-                offset = max([m['_id'] for m in config['members']]) + 1
-            else:
-                offset = 0
-
-            for i, ip in enumerate(to_add):
-                config['members'].append({
-                    '_id': offset + i,
-                    'host': "{}:{}".format(ip, mongo_port)
-                })
-
-        config['version'] += 1
-        logger.debug("New config: {}".format(config))
-
-        # Apply new config
-        res = cli.admin.command("replSetReconfig", config, force=force)
-        logger.info("new replSetReconfig: {}".format(res))
-    finally:
-        cli.close()
-
-
-def manage_replica(mongo_service, overlay_network_name, replicaset_name, mongo_port):
+    :param expected_hosts:
+        The host-addresses for member hosts that *should* be in the replicaset.
+    :param replicaset_name:
+        The name of the replicaset that we are wanting hosts for.
+    :return:
+        A tuple consisting of:
+        - A set of host-addresses for all known replicaset members
+        - The host-address of the current replicaset primary (or None if there is no current primary)
     """
+    rs_members = set()
+    rs_primary = None
+    logger = logging.getLogger(__name__)
+    for host in expected_hosts:
+        try:
+            with pm.MongoClient(host=host, directConnection=True) as mc:
+                rs_config = mc.admin.command("replSetGetConfig")['config']
+                rs_id = rs_config.get('_id')
+                if rs_id == replicaset_name:
+                    logger.debug(f"Host '{host} is a current member of replicaset '{replicaset_name}'. is_primary = {mc.is_primary}")
+                    rs_members.update([
+                        m['host'] for m in rs_config['members']
+                    ])
+                    if mc.is_primary:
+                        rs_primary = host
+                else:
+                    logger.warning(f"Host '{host} is a current member of an unexpected replicaset '{rs_id}'")
+        except ServerSelectionTimeoutError as sste:
+            logger.warning(f"Host '{host}' timed out replicaset configuration check: {sste}")
+        except OperationFailure as of:
+            logger.debug(f"Host '{host}' has no current replicaset configuration: {of}")
+        except Exception:
+            logger.exception(level=logging.WARNING, msg=f"Unexpected error checking replicaset configuration for host '{host}'")
+
+    logger.debug(f"Current replicaset configuration: members = {rs_members}, primary = {rs_primary}")
+    return rs_members, rs_primary
+
+
+def update_replicaset(
+    connect_host: str,
+    remove_hosts: set(str),
+    add_hosts: set(str)
+) -> None:
+    """Update the MongoDB Replicaset to ensure it has the correct set of members.
+
+    Actually not too different from what mongo does:
+    https://github.com/mongodb/mongo/blob/master/src/mongo/shell/utils.js
+
+    Note: MongoDB can only add or remove one voting member at a time!
+    https://www.mongodb.com/docs/manual/reference/command/replSetReconfig/#std-label-replSetReconfig-cmd-single-node
+
+    :param connect_host:
+        The MongoDB host to connect to in order to make this change.
+        Ideally the current primary, or at least a current member of the replicaset
+        (will be the new primary after this reconfiguration)
+    :param remove_hosts:
+        The MongoDB host-addresses to remove as current replicaset members.
+        Must not include `connect_host`.
+    :param add_hosts:
+        The MongoDB host-addresses to add as new replicaset members.
+        May include `connect_host` if all other current members are being removed.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        assert remove_hosts or add_hosts
+        assert connect_host not in remove_hosts
+        with pm.MongoClient(host=connect_host, directConnection=True) as cli:
+            # Retrieve the *current* replicaset configuration
+            rs_status = cli.admin.command("replSetGetStatus").get('ok', 0)
+            rs_config = cli.admin.command("replSetGetConfig")['config']
+            logger.info(f"Old Configs: {rs_config}")
+            rs_members = rs_config['members']
+
+            # Impose the new replicaset configuration,
+            # forcing the change if that is what it takes.
+            if remove_hosts:
+                logger.info(f"To remove: {remove_hosts}")
+                rs_config['members'] = [m for m in rs_members if m['host'] not in remove_hosts]
+
+            if add_hosts:
+                logger.info(f"To add: {add_hosts}")
+                if rs_members:
+                    next_id = max([m['_id'] for m in rs_members]) + 1
+                else:
+                    next_id = 0
+                for add_host in add_hosts:
+                    rs_config['members'].append({
+                        '_id': next_id,
+                        'host': add_host
+                    })
+                    next_id += 1
+
+            rs_config['version'] += 1
+            force_required = (
+                not cli.is_primary
+                or (rs_status != 1)
+                or ((len(remove_hosts) + len(add_hosts)) > 1)
+            )
+            logger.debug(f"New config: {rs_config}, force required to impose it? {force_required}")
+            res = cli.admin.command("replSetReconfig", rs_config, force=force_required)
+            logger.info(f"replSetReconfig: {res}")
+    except Exception:
+        logger.exception("Unexpected exception updating replicaset configuration")
+
+
+def ensure_replicaset(
+    expected_hosts: set(str),
+    replicaset_name: str
+) -> None:
+    """
+    Ensure that the MongoDB replicaset is configured with the expected set of members.
+
+    If there was no replica before, create one from scratch.
+    If there was already replica (e.g, this script was restarted), force a reconfiguration if
+    the membership list doesn't match the one we want.
+
+    :param member_hosts:
+        The host-addresses which MongoDB databases that *should* be in the replicaset are listening on.
+    :param replicaset_name:
+        The name which should identify the replicaset on these hosts.
+    """
+    logger = logging.getLogger(__name__)
+
+    current_hosts, current_primary = get_replicaset_hosts(
+        expected_hosts=expected_hosts,
+        replicaset_name=replicaset_name
+    )
+
+    if not current_hosts:
+        logger.info(f"No previous valid configuration, starting replicaset '{replicaset_name}' from scratch")
+        init_replicaset(
+            member_hosts=expected_hosts,
+            replicaset_name=replicaset_name
+        )
+
+    elif current_hosts.symmetric_difference(expected_hosts):
+        logger.info(f"Configuration change detected.\n\tOld hosts: {current_hosts}\n\tNew hosts: {expected_hosts}")
+        to_keep = current_hosts.intersection(expected_hosts)
+        to_remove = current_hosts - to_keep
+        to_add = expected_hosts - current_hosts
+        if to_keep and current_primary in to_keep:
+            connect_host = current_primary
+        elif to_keep:
+            connect_host = list(to_keep)[0]
+        elif to_add:
+            connect_host = list(to_add)[0]
+        else:
+            # Should not happen, but just in case...
+            raise RuntimeError("This configuration change would result in no members remaining in the replicaset!")
+
+        update_replicaset(
+            connect_host=connect_host,
+            remove_hosts=to_remove,
+            add_hosts=to_add
+        )
+
+    else:
+        logger.info(f"Primary is: {current_primary}")
+
+# endregion
+
+
+# region Main
+
+_EXIT_REQUESTED = False
+
+
+def request_exit(signum, frame):
+    global _EXIT_REQUESTED
+    _EXIT_REQUESTED = True
+    logging.getLogger(__name__).warning("Exit request received")
+
+
+def manage_replica(
+    dc: docker.Client,
+    mongo_service_name: str,
+    overlay_network_name: str,
+    replicaset_name: str,
+    mongo_port: int = 27017,
+    start_interval_seconds: int = 5,
+    start_period_seconds: int = 60,
+    control_interval_seconds: int = 10,
+) -> bool:
+    """MongoDB Replicaset Controller.
+
     To manage the replica is to:
     - Configure replicaset
         If there was no replica before, create one from scratch.
@@ -249,67 +402,84 @@ def manage_replica(mongo_service, overlay_network_name, replicaset_name, mongo_p
     - Watch for changes in tasks ips
         When IP changes are detected, the replica will break, so we must fix it on the fly.
 
-    :param mongo_service:
+    :param dc:
+        A docker API Client connection to the docker swarm that the mongo service is running on.
+    :param mongo_service_name:
+        Name of the Docker Swarm Service made up of MongoDB container tasks
     :param overlay_network_name:
+        Name of the Docker Swarm overlay network which the MongoDB service tasks should be communicating
+        with each other on to keep the replicaset in synch.
     :param replicaset_name:
+        Identifier for the replicaset that the MongoDB service tasks should be members of.
     :param mongo_port:
+        Port number that the MongoDB service tasks should be listening for client-connections
+        from this controller *and* from each other on.
+    :param start_interval_seconds:
+        The number of seconds to wait between attempts to discover whether a (re)starting
+        `mongo_service_name` service is ready to accept connections yet.
+        (Like the `start_interval` for docker service healthchecks)
+    :param start_period_seconds:
+        The total number of seconds to wait for the `mongo_service_name` service tasks to be ready
+        to accept connections before assuming that it has failed to start up.
+        (Like the `start_period` setting for a docker service healthcheck)
+    :param control_interval_seconds`:
+        The number of seconds to wait between attempts to ensure that the MongoDB
+        replicaset is configured and functioning correctly.
+
     :return:
+        `True` if the management loop has exited gracefully.
+        `False` if the management loop has exited due to an error condition.
     """
     logger = logging.getLogger(__name__)
-
-    # Get mongo tasks ips
-    mongo_tasks = get_running_tasks(mongo_service)
-    mongo_tasks_ips = get_tasks_ips(mongo_tasks, overlay_network_name)
-    logger.debug("Mongo tasks ips: {}".format(mongo_tasks_ips))
-
-    current_member_ips = gather_configured_members_ips(mongo_tasks_ips, mongo_port)
-    logger.debug("Current mongo ips: {}".format(current_member_ips))
-    primary_ip = get_primary_ip(current_member_ips, mongo_port)
-    logger.debug("Current primary ip: {}".format(primary_ip))
-
-    if len(current_member_ips) == 0:
-        # Starting from the scratch
-        logger.info("No previous valid configuration, starting replicaset from scratch")
-        current_member_ips = set(mongo_tasks_ips)
-        init_replica(current_member_ips, replicaset_name, mongo_port)
-
-    # Watch for IP changes. If IPs remain stable we assume MongoDB maintains the replicaset working fine.
-    # TODO: Test what happens with an IP swap of members of a working replicaset.
     while True:
-        time.sleep(10)
-        new_member_ips = set(get_tasks_ips(get_running_tasks(mongo_service), overlay_network_name))
-        if current_member_ips.symmetric_difference(new_member_ips):
-            update_config(primary_ip, current_member_ips, new_member_ips, mongo_port)
-        current_member_ips = new_member_ips
-        primary_ip = get_primary_ip(new_member_ips, mongo_port)
+        # Act on any exit request
+        if _EXIT_REQUESTED:
+            logger.info("Exiting as requested")
+            return True
+
+        # Identify the docker swarm service tasks which are our Mongo replicaset members,
+        # and bail if there are still none listening after the configured startup period.
+        mongo_task_ips = wait_for_service_task_ips(
+            dc=dc,
+            service_name=mongo_service_name,
+            overlay_network_name=overlay_network_name,
+            start_interval_seconds=start_interval_seconds,
+            start_period_seconds=start_period_seconds
+        )
+        if not mongo_task_ips:
+            logger.error(f"Unable to identify MongoDB host addresses for tasks of the '{mongo_service_name}' service.")
+            return False
+
+        # Ensure the replicaset is made up of  these docker swarm-service members
+        ensure_replicaset(
+            expected_hosts=set([f'{ip}:{mongo_port}' for ip in mongo_task_ips]),
+            replicaset_name=replicaset_name
+        )
+
+        # Wait a bit before checking again
+        time.sleep(control_interval_seconds)
 
 
 if __name__ == '__main__':
-    # INPUT: Via environment variables
-    dc = docker.from_env()
-    envs = get_required_env_variables()
-    mongo_service_name = envs.pop('mongo_service_name')
-
-    # Simple logging
+    # Initialise simple logging to stderr
     if 'DEBUG' in os.environ:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    logger.info('Waiting mongo service (and tasks) ({}) to start'.format(mongo_service_name))
 
-    # Make sure Mongo is up and running
-    attempts = 10
-    mongo_service = None
-    service_down = True
-    while attempts and service_down:
-        time.sleep(5)
-        mongo_service = get_mongo_service(dc, mongo_service_name)
-        service_down = not is_service_up(mongo_service)
-        attempts -= 1
-    if attempts <= 0 or not mongo_service:
-        logger.error('Expired attempts waiting for mongo service ({})'.format(mongo_service_name))
-        sys.exit(1)
+    try:
+        # Keep an eye out for exit signals...
+        signal.signal(signal.SIGINT, request_exit)
+        signal.signal(signal.SIGTERM, request_exit)
 
-    logger.info("Mongo service is up and running")
-    manage_replica(mongo_service, **envs)
+        # Use the local environment's docker engine and configuration settings
+        dc = docker.from_env()
+        envs = get_required_env_variables()
+
+        # Manage the replicaset until exit or error,
+        graceful_exit = manage_replica(dc=dc, **envs)
+    except Exception:
+        logging.getLogger(__name__).exception('Unexpected exception managing replicaset')
+        graceful_exit = False
+
+    sys.exit(0 if graceful_exit else 1)
