@@ -1,5 +1,19 @@
 # MongoDB replica-set controller for Docker Swarm cluster
 
+---
+
+**About this fork:**
+
+The docker image built from the `onaci-customisations` branch of the [onaci/mongo-rs-controller-swarm repository](https://github.com/onaci/mongo-rs-controller-swarm) repository is available onDockerHub as [onaci/mongo-replica-ctrl](https://hub.docker.com/r/onaci/mongo-replica-ctrl).
+
+The code was forked from [smartsdk/mongo-rs-controller-swarm](https://github.com/smartsdk/mongo-rs-controller-swarm) and its associated [martel/mongo-replica-ctrl](https://hub.docker.com/r/martel/mongo-replica-ctrl) image.
+
+The ONACI fork updates the original to be compatible with modern (November 2025) versions of MongoDB, Python and the Docker API.
+
+---
+
+**Original README:**
+
 [![Build Status](https://travis-ci.org/smartsdk/mongo-rs-controller-swarm.svg?branch=master)](https://travis-ci.org/smartsdk/mongo-rs-controller-swarm)
 
 This repository provides a dockerized controller for a Mongo DB replica-set deployed on a Docker Swarm cluster.
