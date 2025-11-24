@@ -462,10 +462,11 @@ def manage_replica(
 
 if __name__ == '__main__':
     # Initialise simple logging to stderr
-    if 'DEBUG' in os.environ:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=(logging.DEBUG if 'DEBUG' in os.environ else logging.INFO),
+        format='%(asctime)s.%(msecs)03d %(levelname)s [%(name)s:%(lineno)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
 
     try:
         # Keep an eye out for exit signals...
