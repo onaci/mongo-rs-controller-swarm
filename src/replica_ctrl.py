@@ -278,7 +278,7 @@ def update_replicaset(
             # Retrieve the *current* replicaset configuration
             rs_status = cli.admin.command("replSetGetStatus").get('ok', 0)
             rs_config = cli.admin.command("replSetGetConfig")['config']
-            logger.info(f"Old Configs: {rs_config}")
+            logger.debug(f"Old Configs: {rs_config}")
             rs_members = rs_config['members']
 
             # Impose the new replicaset configuration,
