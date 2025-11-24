@@ -336,34 +336,22 @@ def ensure_replicaset(
         replicaset_name=replicaset_name
     )
 
-    if not current_hosts:
-        logger.info(f"No previous valid configuration, starting replicaset '{replicaset_name}' from scratch")
-        init_replicaset(
-            member_hosts=expected_hosts,
-            replicaset_name=replicaset_name
-        )
-
-    elif current_hosts.symmetric_difference(expected_hosts):
-        logger.info(f"Configuration change detected.\n\tOld hosts: {current_hosts}\n\tNew hosts: {expected_hosts}")
+    if current_hosts.symmetric_difference(expected_hosts):
+        logger.info(f"Membership change detected: {current_hosts} -> {expected_hosts}")
         to_keep = current_hosts.intersection(expected_hosts)
-        to_remove = current_hosts - to_keep
-        to_add = expected_hosts - current_hosts
-        if to_keep and current_primary in to_keep:
-            connect_host = current_primary
-        elif to_keep:
-            connect_host = list(to_keep)[0]
-        elif to_add:
-            connect_host = list(to_add)[0]
+        if to_keep:
+            logger.info(f"{len(to_keep)} members of the previous replicaset '{replicaset_name}' are being retained")
+            update_replicaset(
+                connect_host=(current_primary if current_primary in to_keep else list(to_keep)[0]),
+                remove_hosts=(current_hosts - to_keep),
+                add_hosts=(expected_hosts - current_hosts)
+            )
         else:
-            # Should not happen, but just in case...
-            raise RuntimeError("This configuration change would result in no members remaining in the replicaset!")
-
-        update_replicaset(
-            connect_host=connect_host,
-            remove_hosts=to_remove,
-            add_hosts=to_add
-        )
-
+            logger.info(f"No previous valid configuration, starting replicaset '{replicaset_name}' from scratch")
+            init_replicaset(
+                member_hosts=expected_hosts,
+                replicaset_name=replicaset_name
+            )
     else:
         logger.info(f"Primary is: {current_primary}")
 
@@ -462,10 +450,11 @@ def manage_replica(
 
 if __name__ == '__main__':
     # Initialise simple logging to stderr
-    if 'DEBUG' in os.environ:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=(logging.DEBUG if 'DEBUG' in os.environ else logging.INFO),
+        format='%(asctime)s.%(msecs)03d %(levelname)s [%(name)s:%(lineno)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
 
     try:
         # Keep an eye out for exit signals...
